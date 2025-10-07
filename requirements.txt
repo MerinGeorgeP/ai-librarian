@@ -1,2 +1,4 @@
 pdfplumber
 faiss
+sentence-transformers
+numpy
