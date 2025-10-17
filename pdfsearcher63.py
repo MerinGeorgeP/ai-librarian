@@ -20,24 +20,30 @@ def verify_password(password, hashed):
     return hash_password(password) == hashed
 
 # --- Users DB ---
-USERS_DB = "users_db.pkl"
-os.makedirs("users", exist_ok=True)
+USERS_DIR = "users"
+USERS_DB = os.path.join(USERS_DIR, "users_db.pkl")
+os.makedirs(USERS_DIR, exist_ok=True)
 
+# Load users database
 if os.path.exists(USERS_DB):
     with open(USERS_DB, "rb") as f:
         users_db = pickle.load(f)
 else:
     users_db = {}
 
+def save_users_db():
+    """Save the users database permanently."""
+    with open(USERS_DB, "wb") as f:
+        pickle.dump(users_db, f)
+
 def signup(username, password):
     if username in users_db:
         st.error("Username already exists.")
         return False
     users_db[username] = hash_password(password)
-    with open(USERS_DB, "wb") as f:
-        pickle.dump(users_db, f)
+    save_users_db()
     # Create user directory
-    os.makedirs(f"users/{username}/uploaded_pdfs", exist_ok=True)
+    os.makedirs(os.path.join(USERS_DIR, username, "uploaded_pdfs"), exist_ok=True)
     st.success("Signup successful! You can now log in.")
     return True
 
@@ -54,7 +60,7 @@ def login(username, password):
     return True
 
 def get_user_paths(username):
-    user_dir = f"users/{username}"
+    user_dir = os.path.join(USERS_DIR, username)
     os.makedirs(user_dir, exist_ok=True)
     return {
         "UPLOAD_DIR": os.path.join(user_dir, "uploaded_pdfs"),
@@ -175,9 +181,10 @@ if 'auth_choice' not in st.session_state:
 # -----------------------------
 if not st.session_state.logged_in:
     st.header("👤 Login or Signup")
-
-    # Radio button for Login / Signup
-    st.session_state.auth_choice = st.radio("Choose action", ["Login", "Signup"], index=0 if st.session_state.auth_choice=="Login" else 1)
+    st.session_state.auth_choice = st.radio(
+        "Choose action", ["Login", "Signup"],
+        index=0 if st.session_state.auth_choice=="Login" else 1
+    )
 
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
@@ -185,8 +192,7 @@ if not st.session_state.logged_in:
     if st.button("Submit"):
         if st.session_state.auth_choice == "Signup":
             if signup(username, password):
-                # Switch automatically to login mode
-                st.session_state.auth_choice = "Login"
+                st.session_state.auth_choice = "Login"  # switch automatically to login
         elif st.session_state.auth_choice == "Login":
             if login(username, password):
                 st.session_state.logged_in = True
@@ -276,7 +282,7 @@ else:
                 st.write(f"• {name}")
             if st.button("🗑️ Clear Entire Library (including PDFs)", type="secondary"):
                 clear_all_data(user_paths)
-                
+                st.experimental_rerun()
 
     # --- Search Page ---
     elif st.session_state.page == 'search':
