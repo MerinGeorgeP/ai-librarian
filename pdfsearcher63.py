@@ -205,7 +205,7 @@ else:
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
         st.session_state.page = 'home'
-        st.experimental_rerun()
+        
 
     user_paths = get_user_paths(st.session_state.username)
 
@@ -335,4 +335,5 @@ else:
                             with st.expander("Show best matching snippet", expanded=True):
                                 highlighted_chunk = result['chunk'].replace(search_query, f"**{search_query}**")
                                 st.write(f"...{highlighted_chunk}...")
+
 
