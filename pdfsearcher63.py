@@ -282,7 +282,7 @@ else:
                 st.write(f"• {name}")
             if st.button("🗑️ Clear Entire Library (including PDFs)", type="secondary"):
                 clear_all_data(user_paths)
-                st.experimental_rerun()
+                
 
     # --- Search Page ---
     elif st.session_state.page == 'search':
@@ -335,3 +335,4 @@ else:
                             with st.expander("Show best matching snippet", expanded=True):
                                 highlighted_chunk = result['chunk'].replace(search_query, f"**{search_query}**")
                                 st.write(f"...{highlighted_chunk}...")
+
