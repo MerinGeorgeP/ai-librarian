@@ -8,8 +8,7 @@ import pickle
 import shutil
 import hashlib
 from transformers import pipeline
-os.system("pip install fpdf --quiet")
-from fpdf import FPDF
+
 
 # ============================================================
 # 🔐 AUTHENTICATION & USER MANAGEMENT
@@ -145,16 +144,7 @@ def get_relevant_chunks(query, index, doc_chunks, top_k=3):
             relevant_texts.append(chunk)
     return " ".join(relevant_texts)
 
-def create_pdf(summary, title="PDF Output"):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 16)
-    pdf.cell(0, 10, title, ln=True, align="C")
-    pdf.ln(10)
-    pdf.set_font("Arial", size=12)
-    safe_summary = summary.encode('latin-1', 'replace').decode('latin-1')
-    pdf.multi_cell(0, 10, safe_summary)
-    return pdf.output(dest="S").encode("latin-1")
+
 
 # ============================================================
 # 🗂️ DATA STORAGE / FAISS INDEX
@@ -349,7 +339,7 @@ else:
                     st.success("✅ Summary generated!")
                     st.write(summary)
                     pdf_bytes = create_pdf(summary, title=f"Summary of {selected_file}")
-                    st.download_button("⬇️ Download Summary PDF", data=pdf_bytes, file_name=f"summary_{selected_file}", mime="application/pdf")
+                    
 
     # ---------------- Q&A SECTION ----------------
     elif menu == "💬 Ask Questions":
@@ -394,7 +384,7 @@ else:
                         st.write(context)
 
                     pdf_bytes = create_pdf(f"Question: {question}\n\nAnswer: {answer}", title=f"Answer from {selected_file}")
-                    st.download_button("⬇️ Download Answer PDF", data=pdf_bytes, file_name=f"answer_{selected_file}", mime="application/pdf")
+                    
 
 
 
