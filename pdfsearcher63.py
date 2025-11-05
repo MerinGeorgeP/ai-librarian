@@ -7,24 +7,23 @@ import os
 import pickle
 import shutil
 import hashlib
+from transformers import pipeline
+from fpdf import FPDF
 
-# -----------------------------
-# --- Helper Functions --------
-# -----------------------------
+# ============================================================
+# 🔐 AUTHENTICATION & USER MANAGEMENT
+# ============================================================
 
-# --- Password Hashing ---
 def hash_password(password: str):
     return hashlib.sha256(password.encode()).hexdigest()
 
 def verify_password(password, hashed):
     return hash_password(password) == hashed
 
-# --- Users DB ---
 USERS_DIR = "users"
 USERS_DB = os.path.join(USERS_DIR, "users_db.pkl")
 os.makedirs(USERS_DIR, exist_ok=True)
 
-# Load users database
 if os.path.exists(USERS_DB):
     with open(USERS_DB, "rb") as f:
         users_db = pickle.load(f)
@@ -32,7 +31,6 @@ else:
     users_db = {}
 
 def save_users_db():
-    """Save the users database permanently."""
     with open(USERS_DB, "wb") as f:
         pickle.dump(users_db, f)
 
@@ -42,7 +40,6 @@ def signup(username, password):
         return False
     users_db[username] = hash_password(password)
     save_users_db()
-    # Create user directory
     os.makedirs(os.path.join(USERS_DIR, username, "uploaded_pdfs"), exist_ok=True)
     st.success("Signup successful! You can now log in.")
     return True
@@ -68,54 +65,109 @@ def get_user_paths(username):
         "DOC_CHUNKS_PATH": os.path.join(user_dir, "doc_chunks.pkl")
     }
 
-# --- Model & FAISS ---
+# ============================================================
+# 🤖 MODEL LOADERS (Cached)
+# ============================================================
+
 @st.cache_resource
-def load_model():
+def load_sentence_model():
     return SentenceTransformer('all-MiniLM-L6-v2')
 
-CHUNK_SIZE = 1000
-CHUNK_OVERLAP = 200
+@st.cache_resource
+def load_summarizer():
+    return pipeline("summarization", model="facebook/bart-large-cnn", device=-1)
 
-def chunk_text(text, chunk_size, chunk_overlap):
-    if not text:
-        return []
+@st.cache_resource
+def load_qa_model():
+    """Lightweight QA model"""
+    return pipeline("text2text-generation", model="google/t5-efficient-tiny", device=-1)
+
+# ============================================================
+# 📘 PDF PROCESSING HELPERS
+# ============================================================
+
+def extract_text_from_pdf(pdf_path):
+    text = ""
+    with pdfplumber.open(pdf_path) as pdf:
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text + "\n"
+    return text.strip()
+
+def chunk_text(text, chunk_size=1000, overlap=200):
     chunks = []
     start = 0
     while start < len(text):
         end = start + chunk_size
         chunks.append(text[start:end])
-        start += chunk_size - chunk_overlap
+        start += chunk_size - overlap
     return chunks
 
-def extract_text_from_pdf(pdf_path):
-    text = ""
+# ============================================================
+# 🧠 SUMMARIZATION & QA HELPERS
+# ============================================================
+
+def summarize_text(summarizer, text, max_chunk_length=800):
+    words = text.split()
+    chunks = [" ".join(words[i:i + max_chunk_length]) for i in range(0, len(words), max_chunk_length)]
+    summaries = []
+    for chunk in chunks:
+        try:
+            inputs = chunk[:3000]
+            summary = summarizer(inputs, max_length=200, min_length=60, do_sample=False)[0]['summary_text']
+            summaries.append(summary)
+        except Exception as e:
+            print(f"Skipping chunk due to error: {e}")
+    return " ".join(summaries)
+
+def qa_answer(model, question, context):
+    """Generate answer using t5-efficient-tiny"""
+    prompt = f"question: {question}  context: {context}"
     try:
-        with pdfplumber.open(pdf_path) as pdf:
-            if not pdf.pages:
-                st.warning(f"Warning: Could not find any pages in '{os.path.basename(pdf_path)}'.")
-                return ""
-            for page in pdf.pages:
-                page_text = page.extract_text()
-                if page_text:
-                    text += page_text + "\n"
+        result = model(prompt, max_length=80, min_length=5, do_sample=False)
+        return result[0]['generated_text']
     except Exception as e:
-        st.error(f"Error reading {os.path.basename(pdf_path)}: {e}")
-        return ""
-    return text.strip()
+        print("Error generating answer:", e)
+        return "Unable to generate an answer."
+
+def get_relevant_chunks(query, index, doc_chunks, top_k=3):
+    """Retrieve most relevant text chunks via FAISS"""
+    model = load_sentence_model()
+    q_emb = model.encode([query])
+    faiss.normalize_L2(q_emb)
+    distances, indices = index.search(np.array(q_emb, dtype=np.float32), top_k)
+    relevant_texts = []
+    for idx in indices[0]:
+        if idx < len(doc_chunks):
+            _, chunk = doc_chunks[idx]
+            relevant_texts.append(chunk)
+    return " ".join(relevant_texts)
+
+def create_pdf(summary, title="PDF Output"):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", "B", 16)
+    pdf.cell(0, 10, title, ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Arial", size=12)
+    safe_summary = summary.encode('latin-1', 'replace').decode('latin-1')
+    pdf.multi_cell(0, 10, safe_summary)
+    return pdf.output(dest="S").encode("latin-1")
+
+# ============================================================
+# 🗂️ DATA STORAGE / FAISS INDEX
+# ============================================================
 
 def build_faiss_index(doc_chunks):
-    if not doc_chunks:
-        return None
-    model = load_model()
-    chunk_texts = [chunk for _, chunk in doc_chunks]
-    embeddings = model.encode(chunk_texts, convert_to_tensor=False, show_progress_bar=True)
+    model = load_sentence_model()
+    texts = [chunk for _, chunk in doc_chunks]
+    embeddings = model.encode(texts, convert_to_tensor=False)
     faiss.normalize_L2(embeddings)
-    d = embeddings.shape[1]
-    index = faiss.IndexFlatL2(d)
+    index = faiss.IndexFlatL2(embeddings.shape[1])
     index.add(np.array(embeddings, dtype=np.float32))
     return index
 
-# --- Persistence ---
 def save_data(index, doc_chunks, paths):
     if index is not None:
         faiss.write_index(index, paths["INDEX_PATH"])
@@ -126,218 +178,219 @@ def load_data(paths):
     index = None
     doc_chunks = []
     if os.path.exists(paths["INDEX_PATH"]) and os.path.exists(paths["DOC_CHUNKS_PATH"]):
-        try:
-            index = faiss.read_index(paths["INDEX_PATH"])
-            with open(paths["DOC_CHUNKS_PATH"], "rb") as f:
-                doc_chunks = pickle.load(f)
-        except Exception as e:
-            st.error(f"Error loading saved data: {e}. Clearing old data.")
-            clear_all_data(paths)
+        index = faiss.read_index(paths["INDEX_PATH"])
+        with open(paths["DOC_CHUNKS_PATH"], "rb") as f:
+            doc_chunks = pickle.load(f)
     return index, doc_chunks
 
 def clear_all_data(paths):
     st.session_state.index = None
     st.session_state.doc_chunks = []
-    if os.path.exists(paths["INDEX_PATH"]):
-        os.remove(paths["INDEX_PATH"])
-    if os.path.exists(paths["DOC_CHUNKS_PATH"]):
-        os.remove(paths["DOC_CHUNKS_PATH"])
     if os.path.exists(paths["UPLOAD_DIR"]):
         shutil.rmtree(paths["UPLOAD_DIR"])
     os.makedirs(paths["UPLOAD_DIR"], exist_ok=True)
-    st.success("Cleared all indexed data and stored PDFs.")
+    st.success("Cleared all stored PDFs.")
 
-def get_indexed_filenames(paths):
-    if not os.path.exists(paths["UPLOAD_DIR"]):
-        return []
-    return sorted(os.listdir(paths["UPLOAD_DIR"]))
+# ============================================================
+# 🎨 STREAMLIT APP
+# ============================================================
 
-# -----------------------------
-# --- Streamlit App Setup -----
-# -----------------------------
 st.set_page_config(page_title="AI Librarian", layout="wide")
-st.title("📚 AI Librarian")
-st.markdown("""
-    <style>
-    .stApp { background-color: #f0f2f1; }
-    .stButton>button { width: 100%; border-radius: 0.5rem; }
-    </style>
-    """, unsafe_allow_html=True)
+st.title("📚 AI Librarian + 🧠 Summarizer + 💬 Q&A")
 
-# -----------------------------
-# --- Session State Init ------
-# -----------------------------
+# --- Session State ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'page' not in st.session_state:
     st.session_state.page = 'home'
-if 'initialized' not in st.session_state:
-    st.session_state.initialized = False
-if 'auth_choice' not in st.session_state:
-    st.session_state.auth_choice = 'Login'
 
-# -----------------------------
-# --- Login / Signup Flow -----
-# -----------------------------
+# --- Login / Signup ---
 if not st.session_state.logged_in:
-    st.header("👤 Login or Signup")
-    st.session_state.auth_choice = st.radio(
-        "Choose action", ["Login", "Signup"],
-        index=0 if st.session_state.auth_choice=="Login" else 1
-    )
-
+    st.header("👤 Login / Signup")
+    choice = st.radio("Select Action", ["Login", "Signup"])
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
 
     if st.button("Submit"):
-        if st.session_state.auth_choice == "Signup":
-            if signup(username, password):
-                st.session_state.auth_choice = "Login"  # switch automatically to login
-        elif st.session_state.auth_choice == "Login":
-            if login(username, password):
-                st.session_state.logged_in = True
+        if choice == "Signup":
+            signup(username, password)
+        else:
+            login(username, password)
 
-# -----------------------------
-# --- Main App After Login ----
-# -----------------------------
 else:
-    st.sidebar.write(f"Logged in as: **{st.session_state.username}**")
+    st.sidebar.write(f"👋 Logged in as **{st.session_state.username}**")
+    user_paths = get_user_paths(st.session_state.username)
+    st.session_state.index, st.session_state.doc_chunks = load_data(user_paths)
+
     if st.sidebar.button("Logout"):
         st.session_state.logged_in = False
-        st.session_state.page = 'home'
-        
+        st.experimental_rerun()
 
-    user_paths = get_user_paths(st.session_state.username)
+    # Navigation
+    menu = st.sidebar.radio(
+        "Navigation",
+        ["🏠 Home", "📤 Upload PDFs", "🔎 Search PDFs", "🧠 Summarize PDF", "💬 Ask Questions"]
+    )
 
-    # Initialize user data
-    if not st.session_state.initialized:
-        st.session_state.index, st.session_state.doc_chunks = load_data(user_paths)
-        st.session_state.initialized = True
+    # ---------------- HOME ----------------
+    if menu == "🏠 Home":
+        st.header("Welcome to AI Librarian")
+        st.write("Upload, search, summarize, and ask questions about your PDFs!")
 
-    # --- Page Navigation ---
-    def go_to_home(): st.session_state.page = 'home'
-    def go_to_upload(): st.session_state.page = 'upload'
-    def go_to_search(): st.session_state.page = 'search'
+    # ---------------- UPLOAD ----------------
+    elif menu == "📤 Upload PDFs":
+        st.header("Upload and Manage PDFs")
+        uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
 
-    # --- Home Page ---
-    if st.session_state.page == 'home':
-        st.header("What would you like to do?")
-        col1, col2 = st.columns(2)
-        with col1:
-            st.button("📤 Upload & Manage PDFs", on_click=go_to_upload, type="primary")
-        with col2:
-            st.button("🔎 Search PDFs", on_click=go_to_search, type="primary", disabled=st.session_state.index is None)
-        if st.session_state.index is None:
-            st.info("The search function is disabled. Please upload and index at least one PDF.")
+        if uploaded_files and st.button("Save Files"):
+            for file in uploaded_files:
+                with open(os.path.join(user_paths["UPLOAD_DIR"], file.name), "wb") as f:
+                    f.write(file.getbuffer())
+            st.success("Files uploaded successfully!")
 
-    # --- Upload Page ---
-    elif st.session_state.page == 'upload':
-        st.button("← Back to Home", on_click=go_to_home)
-        st.header("1. Manage Your PDFs")
-        uploaded_files = st.file_uploader(
-            "Upload new PDF files to add them to your permanent library.",
-            type="pdf", accept_multiple_files=True
-        )
+            # ✅ Build FAISS index automatically
+            st.info("Building FAISS index for uploaded PDFs...")
+            doc_chunks = []
+            for file in os.listdir(user_paths["UPLOAD_DIR"]):
+                pdf_path = os.path.join(user_paths["UPLOAD_DIR"], file)
+                text = extract_text_from_pdf(pdf_path)
+                if text.strip():
+                    chunks = chunk_text(text)
+                    doc_chunks.extend([(file, c) for c in chunks])
 
-        if uploaded_files:
-            if st.button("Store and Index PDFs", type="primary"):
-                with st.spinner("Saving and Processing PDFs... This may take a moment."):
-                    indexed_files = get_indexed_filenames(user_paths)
-                    new_files_processed = False
+            if doc_chunks:
+                index = build_faiss_index(doc_chunks)
+                save_data(index, doc_chunks, user_paths)
+                st.session_state.index = index
+                st.session_state.doc_chunks = doc_chunks
+                st.success("✅ Index built successfully! You can now search or ask questions.")
+            else:
+                st.warning("No valid text extracted from PDFs — index not built.")
 
-                    # Save new files
-                    for pdf_file in uploaded_files:
-                        if pdf_file.name not in indexed_files:
-                            with open(os.path.join(user_paths["UPLOAD_DIR"], pdf_file.name), "wb") as f:
-                                f.write(pdf_file.getbuffer())
-                            st.write(f"✅ Saved '{pdf_file.name}' to permanent storage.")
+        existing = os.listdir(user_paths["UPLOAD_DIR"])
+        if existing:
+            st.subheader("Stored PDFs:")
+            for f in existing:
+                st.write("•", f)
 
-                    # Rebuild index
-                    st.write("Rebuilding search index from all stored PDFs...")
-                    all_stored_pdfs = get_indexed_filenames(user_paths)
-                    st.session_state.doc_chunks = []
+            if st.button("🔄 Rebuild FAISS Index"):
+                st.info("Rebuilding FAISS index...")
+                doc_chunks = []
+                for file in os.listdir(user_paths["UPLOAD_DIR"]):
+                    pdf_path = os.path.join(user_paths["UPLOAD_DIR"], file)
+                    text = extract_text_from_pdf(pdf_path)
+                    if text.strip():
+                        chunks = chunk_text(text)
+                        doc_chunks.extend([(file, c) for c in chunks])
+                if doc_chunks:
+                    index = build_faiss_index(doc_chunks)
+                    save_data(index, doc_chunks, user_paths)
+                    st.session_state.index = index
+                    st.session_state.doc_chunks = doc_chunks
+                    st.success("✅ FAISS index rebuilt successfully!")
+                else:
+                    st.warning("No valid text found to rebuild index.")
 
-                    for filename in all_stored_pdfs:
-                        st.write(f"Processing {filename}...")
-                        file_path = os.path.join(user_paths["UPLOAD_DIR"], filename)
-                        full_text = extract_text_from_pdf(file_path)
-                        if full_text:
-                            chunks = chunk_text(full_text, CHUNK_SIZE, CHUNK_OVERLAP)
-                            st.session_state.doc_chunks.extend([(filename, chunk) for chunk in chunks])
-                            new_files_processed = True
-
-                    if new_files_processed:
-                        st.write("Creating and saving new search index...")
-                        st.session_state.index = build_faiss_index(st.session_state.doc_chunks)
-                        save_data(st.session_state.index, st.session_state.doc_chunks, user_paths)
-                        st.success(f"Index updated successfully! Total documents: {len(all_stored_pdfs)}")
-                    else:
-                        st.info("No new PDFs were added.")
-
-        # Show stored PDFs
-        indexed_filenames = get_indexed_filenames(user_paths)
-        if indexed_filenames:
-            st.subheader("Currently Stored PDFs:")
-            for name in indexed_filenames:
-                st.write(f"• {name}")
-            if st.button("🗑️ Clear Entire Library (including PDFs)", type="secondary"):
+            if st.button("🗑️ Clear Library"):
                 clear_all_data(user_paths)
-                
 
-    # --- Search Page ---
-    elif st.session_state.page == 'search':
-        st.button("← Back to Home", on_click=go_to_home)
-        st.header("2. Search for Information")
-        st.write("Enter a keyword or sentence to find the most relevant snippet from your PDFs.")
+    # ---------------- SEARCH ----------------
+    elif menu == "🔎 Search PDFs":
+        st.header("Search Stored PDFs")
 
-        with st.form(key="search_form"):
-            search_query = st.text_input("Search Query")
-            k_results = st.slider("Number of unique PDFs to show:", 1, 5, 3)
-            search_button = st.form_submit_button("Search")
+        # ✅ Always reload saved FAISS index
+        st.session_state.index, st.session_state.doc_chunks = load_data(user_paths)
 
-        if search_button and search_query:
-            if st.session_state.index is not None:
-                with st.spinner("Searching..."):
-                    model = load_model()
-                    query_embedding = model.encode([search_query])
-                    faiss.normalize_L2(query_embedding)
+        if st.session_state.index is None or not st.session_state.doc_chunks:
+            st.warning("No indexed documents found. Please upload PDFs first.")
+        else:
+            query = st.text_input("Enter search query")
+            if st.button("Search"):
+                model = load_sentence_model()
+                q_emb = model.encode([query])
+                faiss.normalize_L2(q_emb)
+                distances, indices = st.session_state.index.search(np.array(q_emb, dtype=np.float32), 10)
 
-                    DISTANCE_THRESHOLD = 1.3
-                    num_candidates = k_results * 5
-                    distances, indices = st.session_state.index.search(
-                        np.array(query_embedding, dtype=np.float32), num_candidates
-                    )
+                seen_files = set()
+                results = []
+                for idx, dist in zip(indices[0], distances[0]):
+                    filename, chunk = st.session_state.doc_chunks[idx]
+                    if filename not in seen_files:
+                        seen_files.add(filename)
+                        results.append((filename, chunk, dist))
 
-                    unique_results = []
-                    displayed_filenames = set()
-                    for i in range(len(indices[0])):
-                        idx = indices[0][i]
-                        dist = distances[0][i]
-                        if dist < DISTANCE_THRESHOLD:
-                            filename, chunk_text = st.session_state.doc_chunks[idx]
-                            if filename not in displayed_filenames:
-                                unique_results.append({
-                                    "filename": filename,
-                                    "chunk": chunk_text,
-                                    "distance": dist
-                                })
-                                displayed_filenames.add(filename)
-                            if len(unique_results) >= k_results:
-                                break
+                if results:
+                    st.subheader("🔍 Search Results:")
+                    for filename, chunk, dist in results:
+                        st.write(f"📄 **{filename}** — (distance: {dist:.2f})")
+                        st.write(chunk[:400] + "...")
+                        st.markdown("---")
+                else:
+                    st.info("No relevant results found.")
 
-                    st.subheader(f"Top {len(unique_results)} Relevant Documents:")
-                    if not unique_results:
-                        st.warning("Could not find any relevant snippets for your query.")
+    # ---------------- SUMMARIZE ----------------
+    elif menu == "🧠 Summarize PDF":
+        st.header("Summarize Your PDFs")
+        files = os.listdir(user_paths["UPLOAD_DIR"])
+        if not files:
+            st.warning("No PDFs available. Please upload first.")
+        else:
+            selected_file = st.selectbox("Select a PDF to summarize", files)
+            if st.button("Generate Summary"):
+                pdf_path = os.path.join(user_paths["UPLOAD_DIR"], selected_file)
+                text = extract_text_from_pdf(pdf_path)
+                if len(text) < 500:
+                    st.warning("PDF too short to summarize.")
+                else:
+                    summarizer = load_summarizer()
+                    with st.spinner("Summarizing..."):
+                        summary = summarize_text(summarizer, text)
+                    st.success("✅ Summary generated!")
+                    st.write(summary)
+                    pdf_bytes = create_pdf(summary, title=f"Summary of {selected_file}")
+                    st.download_button("⬇️ Download Summary PDF", data=pdf_bytes, file_name=f"summary_{selected_file}", mime="application/pdf")
+
+    # ---------------- Q&A SECTION ----------------
+    elif menu == "💬 Ask Questions":
+        st.header("💬 Ask Questions from Your PDFs (T5-Efficient-Tiny + FAISS)")
+        files = os.listdir(user_paths["UPLOAD_DIR"])
+        if not files:
+            st.warning("No PDFs uploaded yet.")
+        else:
+            selected_file = st.selectbox("Select a PDF to query", files)
+            question = st.text_input("Enter your question")
+
+            if st.button("Get Answer"):
+                pdf_path = os.path.join(user_paths["UPLOAD_DIR"], selected_file)
+                text = extract_text_from_pdf(pdf_path)
+                qa_model = load_qa_model()
+
+                if len(text) < 300:
+                    st.warning("PDF too short for Q&A.")
+                else:
+                    if not st.session_state.doc_chunks or not st.session_state.index:
+                        st.info("Building FAISS index...")
+                        chunks = chunk_text(text)
+                        doc_chunks = [(selected_file, c) for c in chunks]
+                        index = build_faiss_index(doc_chunks)
+                        st.session_state.doc_chunks = doc_chunks
+                        st.session_state.index = index
+                        save_data(index, doc_chunks, user_paths)
                     else:
-                        for result in unique_results:
-                            st.markdown("---")
-                            pdf_name = result['filename']
-                            pdf_path = os.path.join(user_paths["UPLOAD_DIR"], pdf_name)
+                        index = st.session_state.index
+                        doc_chunks = st.session_state.doc_chunks
 
-                        if os.path.exists(pdf_path):
-                            pdf_link = f"[📄 {pdf_name}](file://{os.path.abspath(pdf_path)})"
-                            st.markdown(pdf_link, unsafe_allow_html=True)
-                        else:
-                            st.warning(f"PDF file not found: {pdf_name}")
+                    with st.spinner("Retrieving relevant information... 🔍"):
+                        context = get_relevant_chunks(question, index, doc_chunks, top_k=3)
 
+                    with st.spinner("Generating answer... 🤖"):
+                        answer = qa_answer(qa_model, question, context)
 
+                    st.success("✅ Answer generated!")
+                    
+
+                    with st.expander("📘 View Retrieved Context"):
+                        st.write(context)
+
+                    pdf_bytes = create_pdf(f"Question: {question}\n\nAnswer: {answer}", title=f"Answer from {selected_file}")
+                    st.download_button("⬇️ Download Answer PDF", data=pdf_bytes, file_name=f"answer_{selected_file}", mime="application/pdf")
