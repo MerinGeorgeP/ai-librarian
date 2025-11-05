@@ -8,7 +8,7 @@ import pickle
 import shutil
 import hashlib
 from transformers import pipeline
-os.system("pip install fpdf2 --quiet")
+os.system("pip install fpdf --quiet")
 from fpdf import FPDF
 
 # ============================================================
@@ -395,5 +395,6 @@ else:
 
                     pdf_bytes = create_pdf(f"Question: {question}\n\nAnswer: {answer}", title=f"Answer from {selected_file}")
                     st.download_button("⬇️ Download Answer PDF", data=pdf_bytes, file_name=f"answer_{selected_file}", mime="application/pdf")
+
 
 
