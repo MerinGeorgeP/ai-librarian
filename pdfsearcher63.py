@@ -338,7 +338,7 @@ else:
                         summary = summarize_text(summarizer, text)
                     st.success("✅ Summary generated!")
                     st.write(summary)
-                    pdf_bytes = create_pdf(summary, title=f"Summary of {selected_file}")
+                    
                     
 
     # ---------------- Q&A SECTION ----------------
@@ -383,8 +383,9 @@ else:
                     with st.expander("📘 View Retrieved Context"):
                         st.write(context)
 
-                    pdf_bytes = create_pdf(f"Question: {question}\n\nAnswer: {answer}", title=f"Answer from {selected_file}")
                     
+                    
+
 
 
 
