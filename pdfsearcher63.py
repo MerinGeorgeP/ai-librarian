@@ -330,10 +330,14 @@ else:
                         st.warning("Could not find any relevant snippets for your query.")
                     else:
                         for result in unique_results:
-                            st.markdown(f"---")
-                            st.info(f"**📄 Source PDF:** `{result['filename']}`\n\n**Relevance Score:** {result['distance']:.2f}")
-                            with st.expander("Show best matching snippet", expanded=True):
-                                highlighted_chunk = result['chunk'].replace(search_query, f"**{search_query}**")
-                                st.write(f"...{highlighted_chunk}...")
+                            st.markdown("---")
+                            pdf_name = result['filename']
+                            pdf_path = os.path.join(user_paths["UPLOAD_DIR"], pdf_name)
+
+                        if os.path.exists(pdf_path):
+                            pdf_link = f"[📄 {pdf_name}](file://{os.path.abspath(pdf_path)})"
+                            st.markdown(pdf_link, unsafe_allow_html=True)
+                        else:
+                            st.warning(f"PDF file not found: {pdf_name}")
 
 
