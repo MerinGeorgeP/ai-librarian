@@ -3,3 +3,7 @@ pdfplumber
 faiss-cpu
 sentence-transformers
 numpy
+transformers
+torch
+fpdf2
+pickle5
