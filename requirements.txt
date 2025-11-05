@@ -1,8 +1,9 @@
-streamlit>=1.38.0
-pdfplumber>=0.10.3
-sentence-transformers>=3.0.1
-faiss-cpu==1.7.4
-transformers>=4.43.3
-torch==2.2.0
-numpy>=1.26.4
-fpdf2>=2.7.8
+streamlit
+pdfplumber
+faiss-cpu
+sentence-transformers
+numpy
+transformers
+torch
+fpdf
+pickle5
