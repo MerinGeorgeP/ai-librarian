@@ -14,6 +14,8 @@ Fast retrieval - Automated summarization
 AI Librarian solves this by enabling intelligent document processing and
 retrieval.
 
+https://drive.google.com/file/d/1sZh7i9GnXN1AO5VzEHiY-GH9uXCIlhFq/view?usp=drive_link
+
 ------------------------------------------------------------------------
 
 ## 🧠 Overview
@@ -141,6 +143,3 @@ to improve productivity and accessibility.
 
 ------------------------------------------------------------------------
 
-## 📎 Source
-
-Based on project documentation: DOC-20260110-WA0042.pdf
