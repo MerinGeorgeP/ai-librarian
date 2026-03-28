@@ -18,128 +18,65 @@ https://drive.google.com/file/d/1sZh7i9GnXN1AO5VzEHiY-GH9uXCIlhFq/view?usp=drive
 
 ------------------------------------------------------------------------
 
-## 🧠 Overview
 
-AI Librarian is a web-based system that allows users to:
+## ✨ Features
 
--   📤 Upload PDFs\
--   🗂 Manage PDFs\
--   🔍 Perform semantic search\
--   📝 Generate summaries
+-   🔐 User authentication (signup/login)
+-   📤 Upload and manage PDFs
+-   🔎 Semantic search using FAISS
+-   🧠 Extractive summarization
+-   📥 Download summaries
 
-------------------------------------------------------------------------
+## 🤖 Models Used
 
-## 🏗 Architecture
+-   Sentence Embeddings: all-MiniLM-L6-v2 (SentenceTransformers)
+-   Summarization: distilgpt2 (used for lightweight text generation)
+-   Retrieval: FAISS (vector similarity search)
 
-### 🔹 Frontend
+## 🧠 Tech Stack
 
--   Built with **Streamlit**
--   Provides an interactive UI
--   Features:
-    -   User Registration & Login
-    -   PDF Upload
-    -   Search Interface
-    -   Summary Display
+-   Streamlit
+-   pdfplumber
+-   FAISS
+-   SentenceTransformers
+-   Transformers
 
-### 🔹 Backend
+## ⚙️ Installation
 
--   Built with **FastAPI**
--   Handles:
-    -   Authentication (JWT-based)
-    -   PDF processing
-    -   AI model execution
-    -   Data storage and indexing
+``` bash
+python -m venv venv
+source venv/bin/activate
+pip install streamlit pdfplumber faiss-cpu sentence-transformers numpy transformers torch
+```
 
-------------------------------------------------------------------------
+## ▶️ Run
 
-## ⚙️ Workflow
+``` bash
+streamlit run app.py
+```
 
-### 1. User Authentication
+## 📁 Project Structure
 
--   Users sign up with username & password
--   Passwords are securely encrypted
--   JWT token is generated on login
+    users/
+      ├── users_db.pkl
+      ├── <username>/
+          ├── uploaded_pdfs/
+          ├── faiss_index.index
+          ├── doc_chunks.pkl
+    app.py
+    README.md
 
-### 2. Dashboard Access
+## 📌 Usage
 
--   Upload PDFs
--   Search documents
--   Manage files
--   Summarize content
+1.  Login or Signup
+2.  Upload PDFs
+3.  Search or summarize documents
 
-### 3. PDF Upload
+## ⚡ Notes
 
--   Files are sent to backend
--   Text is extracted
--   Converted into embeddings
--   Stored using FAISS for fast retrieval
+-   Works best with text-based PDFs
+-   First run may be slow due to model loading
 
-### 4. Managing PDFs
+## 👨‍💻 Author
 
--   View uploaded files
--   Delete documents
--   Automatically updates search index
-
-### 5. Semantic Search
-
--   User query → converted to embedding
--   FAISS finds relevant matches
--   Returns documents with excerpts
-
-### 6. Summarization
-
--   Text is split into chunks
--   Each chunk summarized using AI (BART)
--   Final combined summary displayed
-
-### 7. Logout
-
--   JWT token removed
--   User session ends securely
-
-------------------------------------------------------------------------
-
-## 🛠 Tech Stack
-
--   **Frontend:** Streamlit\
--   **Backend:** FastAPI\
--   **AI Models:** BART (Summarization), Embeddings\
--   **Search Engine:** FAISS\
--   **Authentication:** JWT\
--   **Storage:** File system + metadata
-
-------------------------------------------------------------------------
-
-## 🔐 Security Features
-
--   Password encryption\
--   JWT-based authentication\
--   User-specific document isolation
-
-------------------------------------------------------------------------
-
-## 📈 Key Advantages
-
--   Faster document search\
--   Intelligent summarization\
--   User-friendly interface\
--   Secure and scalable
-
-------------------------------------------------------------------------
-
-## 📌 Future Improvements
-
--   Multi-format support (Word, PPT)
--   Advanced filtering & tagging
--   Chat with documents (RAG)
--   Cloud deployment
-
-------------------------------------------------------------------------
-
-## 🙌 Acknowledgment
-
-This project demonstrates the integration of AI with document management
-to improve productivity and accessibility.
-
-------------------------------------------------------------------------
-
+Merin George P
